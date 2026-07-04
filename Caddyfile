@@ -1,0 +1,10 @@
+# Caddy provisiona e renova o certificado HTTPS (Let's Encrypt) sozinho.
+# $DOMAIN vem do .env. Requer que o DNS do domínio aponte para o IP do VPS
+# e as portas 80/443 abertas.
+
+{$DOMAIN} {
+	encode gzip
+	# Streamlit usa websockets (/_stcore/stream); o Caddy repassa Upgrade
+	# automaticamente. Preserva o Host para o XSRF do Streamlit funcionar.
+	reverse_proxy web:8501
+}

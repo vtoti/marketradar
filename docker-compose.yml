@@ -1,0 +1,46 @@
+services:
+  # Proxy reverso com HTTPS automático (Let's Encrypt).
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    env_file: .env            # fornece $DOMAIN e $ACME_EMAIL ao Caddyfile
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data       # certificados (persistente)
+      - caddy_config:/config
+    depends_on:
+      - web
+
+  web:
+    build: .
+    image: marketradar
+    restart: unless-stopped
+    expose:
+      - "8501"                 # interno: só o Caddy acessa (não exposto na internet)
+    env_file: .env
+    volumes:
+      - mrdata:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8501/_stcore/health').read()==b'ok' else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  scheduler:
+    image: marketradar
+    build: .
+    restart: unless-stopped
+    command: ["python", "scheduler.py"]
+    env_file: .env
+    volumes:
+      - mrdata:/app/data       # mesmo volume => compartilha banco e tokens
+    depends_on:
+      - web
+
+volumes:
+  mrdata:
+  caddy_data:
+  caddy_config:
