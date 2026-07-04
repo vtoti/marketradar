@@ -32,6 +32,12 @@ class Listing:
     category_id: str = ""
     permalink: str = ""
     thumbnail: str = ""
+    # --- sinais do scraping do site (frente pública do ML) ---
+    original_price: Optional[float] = None   # preço "de" (antes do desconto)
+    discount_pct: Optional[float] = None      # % de desconto anunciado
+    is_bestseller: bool = False               # selo "MAIS VENDIDO"
+    is_ad: bool = False                       # anúncio patrocinado
+    position: int = 0                         # posição no ranking de busca
     collected_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )

@@ -10,12 +10,18 @@ import pandas as pd
 
 
 def market_summary(df: pd.DataFrame) -> dict:
-    """Panorama do mercado de um termo/nicho."""
+    """Panorama do mercado de um termo/nicho.
+
+    Baseado nos dados públicos do ML (sem volume de vendas): preço, desconto,
+    concorrência, nota, frete e selo "Mais Vendido".
+    """
     if df is None or df.empty:
         return {}
     price = df["price"].replace(0, np.nan).dropna()
-    sold = df["sold_quantity"].fillna(0)
-    gmv = df.get("gmv", df["price"] * sold).fillna(0)
+    best = df.get("is_bestseller", pd.Series([0] * len(df))).fillna(0)
+    disc = df.get("discount_pct", pd.Series([np.nan] * len(df)))
+    disc_valid = disc.dropna()
+    disc_valid = disc_valid[disc_valid > 0]
     return {
         "anuncios": int(len(df)),
         "vendedores": int(df["seller_id"].nunique()),
@@ -23,47 +29,54 @@ def market_summary(df: pd.DataFrame) -> dict:
         "preco_mediano": float(price.median()) if not price.empty else 0.0,
         "preco_medio": float(price.mean()) if not price.empty else 0.0,
         "preco_max": float(price.max()) if not price.empty else 0.0,
-        "vendas_totais": int(sold.sum()),
-        "gmv_total": float(gmv.sum()),          # faturamento acumulado estimado
         "ticket_medio": float(price.mean()) if not price.empty else 0.0,
         "avaliacao_media": float(df["rating"].dropna().mean())
         if df["rating"].notna().any() else None,
         "pct_frete_gratis": float(df["free_shipping"].fillna(0).mean() * 100),
+        "mais_vendidos": int(best.sum()),
+        "pct_bestseller": float(best.mean() * 100),
+        "pct_com_desconto": float((len(disc_valid) / len(df)) * 100),
+        "desconto_medio": float(disc_valid.mean()) if not disc_valid.empty else 0.0,
         "concentracao_hhi": seller_hhi(df),
         "share_lider_pct": top_seller_share(df),
+        # compatibilidade: sem dado de vendas na frente pública do ML
+        "vendas_totais": 0,
+        "gmv_total": 0.0,
     }
 
 
 def seller_ranking(df: pd.DataFrame, top: int = 10) -> pd.DataFrame:
-    """Ranking de vendedores por faturamento estimado e vendas."""
+    """Ranking de vendedores por presença no nicho (nº de anúncios)."""
     if df.empty:
         return pd.DataFrame()
     g = df.copy()
-    g["gmv"] = g.get("gmv", g["price"] * g["sold_quantity"]).fillna(0)
-    agg = g.groupby(["seller_id", "seller_name"], as_index=False).agg(
+    g["is_bestseller"] = g.get("is_bestseller", 0)
+    named = g[g["seller_name"].astype(str).str.len() > 0]
+    if named.empty:
+        return pd.DataFrame()
+    agg = named.groupby(["seller_id", "seller_name"], as_index=False).agg(
         anuncios=("listing_id", "nunique"),
-        vendas=("sold_quantity", "sum"),
-        gmv=("gmv", "sum"),
+        mais_vendidos=("is_bestseller", "sum"),
         preco_medio=("price", "mean"),
-    ).sort_values("gmv", ascending=False)
-    total = agg["gmv"].sum() or 1
-    agg["share_pct"] = (agg["gmv"] / total * 100).round(1)
+        nota_media=("rating", "mean"),
+    ).sort_values(["anuncios", "mais_vendidos"], ascending=False)
+    total = agg["anuncios"].sum() or 1
+    agg["share_pct"] = (agg["anuncios"] / total * 100).round(1)
     return agg.head(top).reset_index(drop=True)
 
 
 def top_seller_share(df: pd.DataFrame) -> float:
-    """Fatia de faturamento do maior vendedor (% de concentração)."""
+    """Fatia de anúncios do maior vendedor (% de concentração)."""
     r = seller_ranking(df, top=1)
     return float(r["share_pct"].iloc[0]) if not r.empty else 0.0
 
 
 def seller_hhi(df: pd.DataFrame) -> float:
-    """Índice Herfindahl-Hirschman (0–10000). Alto = mercado concentrado."""
+    """Índice Herfindahl-Hirschman (0–10000) por participação de anúncios.
+    Alto = poucos vendedores dominam o nicho."""
     if df.empty:
         return 0.0
-    g = df.copy()
-    g["gmv"] = g.get("gmv", g["price"] * g["sold_quantity"]).fillna(0)
-    shares = g.groupby("seller_id")["gmv"].sum()
+    shares = df.groupby("seller_id")["listing_id"].nunique()
     total = shares.sum()
     if total <= 0:
         return 0.0

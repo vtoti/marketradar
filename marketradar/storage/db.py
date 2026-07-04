@@ -22,6 +22,8 @@ CREATE TABLE IF NOT EXISTS snapshots (
     price REAL, currency TEXT, sold_quantity INTEGER, available_quantity INTEGER,
     condition TEXT, seller_id TEXT, seller_name TEXT, rating REAL, reviews INTEGER,
     free_shipping INTEGER, category_id TEXT, permalink TEXT, thumbnail TEXT,
+    original_price REAL, discount_pct REAL, is_bestseller INTEGER,
+    is_ad INTEGER, position INTEGER,
     gmv REAL, collected_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_query ON snapshots(query, marketplace);
@@ -71,11 +73,13 @@ def save_listings(listings: list[Listing]) -> int:
     cols = ("marketplace", "listing_id", "title", "query", "price", "currency",
             "sold_quantity", "available_quantity", "condition", "seller_id",
             "seller_name", "rating", "reviews", "free_shipping", "category_id",
-            "permalink", "thumbnail", "gmv", "collected_at")
+            "permalink", "thumbnail", "original_price", "discount_pct",
+            "is_bestseller", "is_ad", "position", "gmv", "collected_at")
+    bool_cols = {"free_shipping", "is_bestseller", "is_ad"}
     rows = []
     for lst in listings:
         d = lst.to_dict()
-        rows.append(tuple(int(d[c]) if c == "free_shipping" else d[c] for c in cols))
+        rows.append(tuple(int(d[c]) if c in bool_cols else d[c] for c in cols))
     with connect() as conn:
         conn.executemany(
             f"INSERT INTO snapshots ({','.join(cols)}) "
