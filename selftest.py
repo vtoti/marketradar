@@ -108,7 +108,11 @@ def main():
     assert not rk.empty and rk["Score"].is_monotonic_decreasing
     print("    ranking:", len(rk), "produtos, topo =", rk.iloc[0]["Score"])
 
-    assert demand_supply_ratio(s) > 0
+    # market_summary devolve vendas_totais=0 de propósito (frente pública do
+    # ML não expõe vendas) → o ratio calculado do summary é 0; com vendas
+    # informadas, deve ser positivo.
+    assert demand_supply_ratio(s) == 0.0
+    assert demand_supply_ratio({"vendas_totais": 900, "vendedores": 8}) > 0
     t = classify_trend(pd.DataFrame([
         {"collected_at": (now - timedelta(days=5)).isoformat(), "sold_quantity": 100},
         {"collected_at": now.isoformat(), "sold_quantity": 200},
@@ -128,6 +132,72 @@ def main():
     assert db.last_job_run()["anuncios"] == 123
     assert not db.list_job_runs().empty
     print(f"    {len(tracked)} termos monitorados, job_run registrado OK")
+
+    print("9) engenharia de preços (pricing)...")
+    from marketradar import pricing
+    ml = pricing.Canal("Mercado Livre Clássico", 12.0, 6.5, 0.0)
+    cv = pricing.custo_variavel(98.0, 6.0, 4.0)          # 108.0
+    assert cv == 108.0, cv
+    rat = pricing.rateio_fixo(6000.0, 255)               # ~23.53
+    d = pricing.decompor(180.0, cv, 6.0, ml, rat)
+    # 180 − 108 − 10.80 − (21.60+6.50) = 33.10 de MC
+    assert abs(d.impostos - 10.80) < 0.01 and abs(d.taxas_canal - 28.10) < 0.01
+    assert abs(d.mc - 33.10) < 0.01, d
+    assert abs(d.lucro - (33.10 - rat)) < 0.01
+    # preço ideal fecha o ciclo: decompor(preco_ideal) devolve a margem alvo
+    ideal = pricing.preco_ideal(cv, 6.0, ml, 20.0, rat)
+    di = pricing.decompor(ideal, cv, 6.0, ml, rat)
+    assert abs(di.lucro_pct - 20.0) < 0.05, di.lucro_pct
+    assert pricing.preco_ideal(cv, 50.0, ml, 45.0) is None  # impossível
+    be = pricing.ponto_equilibrio(6000.0, d.mc)
+    assert be is not None and abs(be - 6000.0 / d.mc) < 0.01
+    assert pricing.classificar(-1) == "prejuízo"
+    print(f"    MC={d.mc:.2f} lucro={d.lucro:.2f} ideal={ideal:.2f} "
+          f"breakeven={be:.0f} un/mês")
+
+    print("10) análise de pedido (Bling offline)...")
+    pedido = {
+        "total": 189.90, "frete": 0,
+        "taxas": {"comissao": 32.28, "custo_frete": 21.90},
+        "itens": [{"codigo": "VS-14", "descricao": "Válvula Solenóide",
+                   "quantidade": 1, "valor": 189.90, "custo_bling": 98.0}],
+    }
+    a = pricing.analisar_pedido(pedido, 6.0, rat)
+    # 189.90 − 98 − 11.394 − 54.18 = 26.33 de MC; lucro = MC − rateio
+    assert abs(a["mc"] - 26.33) < 0.01, a["mc"]
+    assert a["fonte_taxa"] == "Bling" and a["itens_sem_custo"] == 0
+    assert abs(a["lucro"] - (a["mc"] - rat)) < 0.01
+    # sem custo no ERP → resolve pelo cadastro local; sem match → sinaliza
+    pedido2 = {"total": 100.0, "taxas": {"comissao": 0, "custo_frete": 0},
+               "itens": [{"codigo": "X", "descricao": "Produto Y",
+                          "quantidade": 2, "valor": 50.0, "custo_bling": 0}]}
+    a2 = pricing.analisar_pedido(
+        pedido2, 6.0, 0.0, ml, custo_local=lambda cod, desc: 20.0)
+    assert a2["custo_prod"] == 40.0 and a2["itens"][0]["fonte_custo"] == "produto local"
+    a3 = pricing.analisar_pedido(pedido2, 6.0, 0.0, ml)
+    assert a3["itens_sem_custo"] == 1
+    # canal padrão aplicado quando o ERP não traz taxas
+    assert abs(a3["taxas"] - (100 * 0.12 + 6.5)) < 0.01
+    print(f"    pedido ML: MC={a['mc']:.2f} ({a['mc_pct']:.1f}%) "
+          f"status={a['status']} | fallback local/sem-custo OK")
+
+    print("11) persistência pr_* (produtos/canais/fixos/pedidos)...")
+    assert not db.pr_canais().empty, "canais padrão não semeados"
+    db.pr_upsert("pr_produtos", {"nome": "Prod Selftest", "sku": "ST-1",
+                                 "preco": 100.0, "custo": 40.0, "frete": 5.0,
+                                 "embalagem": 2.0, "outros": 0.0,
+                                 "vendas_mes": 30})
+    assert (db.pr_produtos()["nome"] == "Prod Selftest").any()
+    db.pr_set_config("aliquota", "8.5")
+    assert db.pr_get_config("aliquota") == "8.5"
+    db.pr_save_pedidos([{**pedido, "id": 1, "numero": "42", "data": "2026-07-01",
+                         "cliente": "Cliente T", "situacao": "Atendido",
+                         "loja": "", "desconto": 0}], now.isoformat())
+    carregados, sync_at = db.pr_load_pedidos()
+    assert len(carregados) == 1 and carregados[0]["taxas"]["comissao"] == 32.28
+    assert sync_at == now.isoformat()
+    print(f"    {len(db.pr_canais())} canais, produto salvo, "
+          f"{len(carregados)} pedido em cache OK")
 
     print("\n[OK] Todos os testes passaram.")
 
