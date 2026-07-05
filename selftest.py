@@ -181,6 +181,24 @@ def main():
     print(f"    pedido ML: MC={a['mc']:.2f} ({a['mc_pct']:.1f}%) "
           f"status={a['status']} | fallback local/sem-custo OK")
 
+    # margem por item: pedido multi-produto → rateio proporcional fecha a conta
+    multi = {"total": 300.0, "taxas": {"comissao": 45.0, "custo_frete": 15.0},
+             "itens": [
+                 {"codigo": "A", "descricao": "Prod A", "quantidade": 2,
+                  "valor": 100.0, "custo_bling": 50.0},
+                 {"codigo": "B", "descricao": "Prod B", "quantidade": 1,
+                  "valor": 100.0, "custo_bling": 80.0}]}
+    am = pricing.analisar_pedido(multi, 6.0, 10.0)
+    itens_m = pricing.margens_por_item(am)
+    assert len(itens_m) == 2
+    assert abs(sum(m["mc"] for m in itens_m) - am["mc"]) < 0.01
+    assert abs(sum(m["lucro"] for m in itens_m) - am["lucro"]) < 0.01
+    assert abs(sum(m["impostos"] for m in itens_m) - am["impostos"]) < 0.01
+    # item A fatura 2/3 da receita dos itens → leva 2/3 dos impostos/taxas
+    assert abs(itens_m[0]["taxas"] - am["taxas"] * 2 / 3) < 0.01
+    print(f"    multi-item: A lucro={itens_m[0]['lucro']:.2f} "
+          f"B lucro={itens_m[1]['lucro']:.2f} (soma = pedido OK)")
+
     print("11) persistência pr_* (produtos/canais/fixos/pedidos)...")
     assert not db.pr_canais().empty, "canais padrão não semeados"
     db.pr_upsert("pr_produtos", {"nome": "Prod Selftest", "sku": "ST-1",

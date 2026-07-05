@@ -175,23 +175,74 @@ if sem_custo:
 if synced_at:
     st.caption(f"Última sincronização: {synced_at[:19].replace('T', ' ')} UTC")
 
-tabela = pd.DataFrame([{
-    "Pedido": f"#{p.get('numero') or p['id']}",
-    "Data": p.get("data") or "",
-    "SKU": ", ".join(sorted({it.get("codigo") for it in (p.get("itens") or [])
-                             if it.get("codigo")})) or "—",
-    "Situação": p.get("situacao") or "—",
-    "Receita": a["receita"], "Custo prod.": a["custo_prod"],
-    "Impostos": a["impostos"], "Taxas": a["taxas"], "Fonte taxa": a["fonte_taxa"],
-    "MC (R$)": a["mc"], "MC %": a["mc_pct"], "Lucro": a["lucro"],
-    "Status": a["status"], "Itens s/ custo": a["itens_sem_custo"] or None,
-} for p, a in analises])
-st.dataframe(
-    tabela, use_container_width=True, hide_index=True,
-    column_config={c: st.column_config.NumberColumn(format="R$ %.2f")
-                   for c in ("Receita", "Custo prod.", "Impostos", "Taxas",
-                             "MC (R$)", "Lucro")}
-    | {"MC %": st.column_config.NumberColumn(format="%.1f%%")})
+_fmt_moeda = {c: st.column_config.NumberColumn(format="R$ %.2f")
+              for c in ("Receita", "Custo prod.", "Custo", "Impostos", "Taxas",
+                        "MC (R$)", "Lucro")}
+_fmt_pct = {"MC %": st.column_config.NumberColumn(format="%.1f%%"),
+            "Lucro %": st.column_config.NumberColumn(format="%.1f%%")}
+
+t_ped, t_item, t_sku = st.tabs(["📄 Por pedido", "📦 Por item", "🏷️ Por SKU"])
+
+with t_ped:
+    tabela = pd.DataFrame([{
+        "Pedido": f"#{p.get('numero') or p['id']}",
+        "Data": p.get("data") or "",
+        "SKU": ", ".join(sorted({it.get("codigo") for it in (p.get("itens") or [])
+                                 if it.get("codigo")})) or "—",
+        "Situação": p.get("situacao") or "—",
+        "Receita": a["receita"], "Custo prod.": a["custo_prod"],
+        "Impostos": a["impostos"], "Taxas": a["taxas"], "Fonte taxa": a["fonte_taxa"],
+        "MC (R$)": a["mc"], "MC %": a["mc_pct"], "Lucro": a["lucro"],
+        "Status": a["status"], "Itens s/ custo": a["itens_sem_custo"] or None,
+    } for p, a in analises])
+    st.dataframe(tabela, use_container_width=True, hide_index=True,
+                 column_config=_fmt_moeda | _fmt_pct)
+
+with t_item:
+    st.caption("Pedidos com mais de um produto aparecem em várias linhas — "
+               "impostos e taxas rateados pela receita de cada item; custo "
+               "fixo, pela quantidade.")
+    linhas_item = []
+    for p, a in analises:
+        for m in pricing.margens_por_item(a):
+            linhas_item.append({
+                "Pedido": f"#{p.get('numero') or p['id']}",
+                "Data": p.get("data") or "",
+                "SKU": m["codigo"] or "—",
+                "Item": (m["descricao"] or "")[:50],
+                "Qtd": m["quantidade"],
+                "Receita": m["receita"], "Custo": m["custo"],
+                "Impostos": m["impostos"], "Taxas": m["taxas"],
+                "MC (R$)": m["mc"], "MC %": m["mc_pct"], "Lucro": m["lucro"],
+                "Status": m["status"],
+                "Fonte custo": m["fonte_custo"]})
+    st.dataframe(pd.DataFrame(linhas_item), use_container_width=True,
+                 hide_index=True, column_config=_fmt_moeda | _fmt_pct)
+
+with t_sku:
+    st.caption("Todos os pedidos do período somados por produto — o ranking "
+               "do que dá (ou tira) dinheiro.")
+    por_sku: dict = {}
+    for _, a in analises:
+        for m in pricing.margens_por_item(a):
+            chave = m["codigo"] or m["descricao"] or "—"
+            g = por_sku.setdefault(chave, {
+                "SKU": m["codigo"] or "—", "Item": (m["descricao"] or "")[:50],
+                "Pedidos": 0, "Qtd": 0.0, "Receita": 0.0, "Custo": 0.0,
+                "MC (R$)": 0.0, "Lucro": 0.0})
+            g["Pedidos"] += 1
+            g["Qtd"] += m["quantidade"]
+            g["Receita"] += m["receita"]
+            g["Custo"] += m["custo"]
+            g["MC (R$)"] += m["mc"]
+            g["Lucro"] += m["lucro"]
+    agg = pd.DataFrame(list(por_sku.values()))
+    if not agg.empty:
+        agg["Lucro %"] = (agg["Lucro"] / agg["Receita"].replace(0, pd.NA)
+                          * 100).fillna(0.0)
+        agg = agg.sort_values("Lucro", ascending=False)
+    st.dataframe(agg, use_container_width=True, hide_index=True,
+                 column_config=_fmt_moeda | _fmt_pct)
 
 # ----------------------------------------------------------- drill-down
 st.subheader("🔍 Detalhar um pedido")

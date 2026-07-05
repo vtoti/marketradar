@@ -148,3 +148,39 @@ def analisar_pedido(pedido: dict, aliquota_pct: float, rateio_un: float,
         "unidades": unidades, "itens": itens_out, "itens_sem_custo": sem_custo,
         "status": classificar(lucro / receita * 100 if receita > 0 else 0.0),
     }
+
+
+def margens_por_item(analise: dict) -> list[dict]:
+    """Quebra a análise de um pedido em margem POR ITEM.
+
+    Impostos e taxas do pedido são rateados proporcionalmente à receita de
+    cada item; o custo fixo, proporcionalmente à quantidade. A soma dos itens
+    reproduz os totais do pedido (exceto diferenças de frete/desconto que não
+    pertencem a item algum — elas ficam na visão por pedido).
+    """
+    itens = analise.get("itens") or []
+    base = sum(float(i.get("valor") or 0) * float(i.get("quantidade") or 0)
+               for i in itens)
+    unidades = float(analise.get("unidades") or 0)
+    out = []
+    for it in itens:
+        qtd = float(it.get("quantidade") or 0)
+        receita = float(it.get("valor") or 0) * qtd
+        share = receita / base if base > 0 else 0.0
+        custo = float(it.get("custo_unit") or 0) * qtd
+        impostos = analise["impostos"] * share
+        taxas = analise["taxas"] * share
+        fixo = analise["fixo"] * (qtd / unidades) if unidades > 0 else 0.0
+        mc = receita - custo - impostos - taxas
+        lucro = mc - fixo
+        out.append({
+            "codigo": it.get("codigo") or "", "descricao": it.get("descricao") or "",
+            "quantidade": qtd, "receita": receita, "custo": custo,
+            "impostos": impostos, "taxas": taxas, "mc": mc,
+            "mc_pct": mc / receita * 100 if receita > 0 else 0.0,
+            "fixo": fixo, "lucro": lucro,
+            "lucro_pct": lucro / receita * 100 if receita > 0 else 0.0,
+            "fonte_custo": it.get("fonte_custo") or "",
+            "status": classificar(lucro / receita * 100 if receita > 0 else 0.0),
+        })
+    return out
