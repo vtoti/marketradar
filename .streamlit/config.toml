@@ -1,0 +1,10 @@
+# Tema visual do Radar de Mercado (fintech light)
+[theme]
+base = "light"
+primaryColor = "#059669"            # emerald — ações e destaques
+backgroundColor = "#FFFFFF"         # superfície principal
+secondaryBackgroundColor = "#F1F5F9" # slate-100 — sidebar e widgets
+textColor = "#0F172A"               # slate-900
+
+[browser]
+gatherUsageStats = false

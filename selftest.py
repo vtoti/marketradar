@@ -201,6 +201,8 @@ def main():
 
     print("11) persistência pr_* (produtos/canais/fixos/pedidos)...")
     assert not db.pr_canais().empty, "canais padrão não semeados"
+    with db.connect() as conn:  # idempotente: não duplica em re-execuções
+        conn.execute("DELETE FROM pr_produtos WHERE nome = 'Prod Selftest'")
     db.pr_upsert("pr_produtos", {"nome": "Prod Selftest", "sku": "ST-1",
                                  "preco": 100.0, "custo": 40.0, "frete": 5.0,
                                  "embalagem": 2.0, "outros": 0.0,

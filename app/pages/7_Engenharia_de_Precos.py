@@ -1,9 +1,9 @@
 """Engenharia de Preços — margem de contribuição real por produto e canal."""
 import _shared  # noqa: F401
-from _shared import brl
+from _shared import (brl, cor_valor, inject_css, kpi_row, page_header,
+                     status_rotulo, waterfall)
 
 import pandas as pd
-import plotly.graph_objects as go
 import streamlit as st
 
 from marketradar import pricing
@@ -11,11 +11,12 @@ from marketradar.storage import db
 
 st.set_page_config(page_title="Engenharia de Preços", page_icon="💰", layout="wide")
 _shared.login_gate()
+inject_css()
 db.init_db()
 
-st.title("💰 Engenharia de Preços")
-st.caption("Margem de contribuição real: preço − custos variáveis − impostos − "
-           "taxas do canal − rateio de custos fixos.")
+page_header("💰 Engenharia de Preços",
+            "Margem de contribuição real: preço − custos variáveis − impostos "
+            "− taxas do canal − rateio de custos fixos.")
 
 
 # ------------------------------------------------------------------ helpers
@@ -69,16 +70,25 @@ with aba_dash:
                 "MC (R$)": d.mc, "MC %": d.mc_pct, "Lucro/un": d.lucro,
                 "Status": pricing.classificar(d.lucro_pct)})
 
-        k = st.columns(4)
-        k[0].metric("Faturamento previsto/mês", brl(fat))
-        k[1].metric("Margem de contribuição/mês", brl(mc_mes))
-        k[2].metric("Lucro líquido/mês", brl(lucro_mes),
-                    delta=f"{lucro_mes / fat * 100:.1f}% da receita" if fat else None)
         piores = sum(1 for l in linhas if l["Status"] == "prejuízo")
-        k[3].metric("Produtos no prejuízo", piores)
+        kpi_row([
+            {"label": "Faturamento previsto/mês", "value": brl(fat),
+             "tone": "info"},
+            {"label": "Margem contrib./mês", "value": brl(mc_mes),
+             "tone": "neutral", "sub": "antes dos custos fixos"},
+            {"label": "Lucro líquido/mês", "value": brl(lucro_mes),
+             "tone": "ok" if lucro_mes >= 0 else "bad",
+             "sub": f"{lucro_mes / fat * 100:.1f}% da receita" if fat else ""},
+            {"label": "Produtos no prejuízo", "value": piores,
+             "tone": "warn" if piores else "neutral",
+             "sub": "exigem atenção" if piores else "nenhum 🎉"},
+        ])
 
+        df_l = pd.DataFrame(linhas)
+        df_l["Status"] = df_l["Status"].map(status_rotulo)
         st.dataframe(
-            pd.DataFrame(linhas), use_container_width=True, hide_index=True,
+            df_l.style.map(cor_valor, subset=["MC (R$)", "Lucro/un"]),
+            use_container_width=True, hide_index=True,
             column_config={c: st.column_config.NumberColumn(format="R$ %.2f")
                            for c in ("Preço", "Custo var.", "Impostos",
                                      "Taxas canal", "MC (R$)", "Lucro/un")}
@@ -202,10 +212,13 @@ with aba_fixos:
 
     total = fixos["valor_mensal"].sum() if not fixos.empty else 0.0
     vol = db.pr_produtos()["vendas_mes"].sum() if not db.pr_produtos().empty else 0
-    m = st.columns(3)
-    m[0].metric("Total fixo/mês", brl(total))
-    m[1].metric("Volume mensal previsto", f"{int(vol)} un")
-    m[2].metric("Rateio por unidade", brl(_rateio()))
+    kpi_row([
+        {"label": "Total fixo/mês", "value": brl(total), "tone": "info"},
+        {"label": "Volume mensal previsto", "value": f"{int(vol)} un",
+         "tone": "info", "sub": "soma de vendas/mês dos produtos"},
+        {"label": "Rateio por unidade", "value": brl(_rateio()),
+         "tone": "neutral", "sub": "fixo embutido em cada venda"},
+    ])
 
 # --------------------------------------------------------------- calculadora
 with aba_calc:
@@ -237,46 +250,48 @@ with aba_calc:
 
         e1, e2 = st.columns([3, 2])
         with e1:
-            st.subheader("Raio-X do preço")
-            partes = [("Custos variáveis", d.custo_var, "#64748b"),
-                      ("Impostos", d.impostos, "#b45309"),
-                      ("Taxas do canal", d.taxas_canal, "#7c3aed"),
-                      ("Custo fixo rateado", d.fixo_rateado, "#0369a1"),
-                      ("Lucro líquido", d.lucro,
-                       "#0d6b3f" if d.lucro >= 0 else "#b3261e")]
-            fig = go.Figure(go.Bar(
-                x=[v for _, v, _ in partes], y=[n for n, _, _ in partes],
-                orientation="h", marker_color=[c for _, _, c in partes],
-                text=[brl(v) for _, v, _ in partes], textposition="outside"))
-            fig.update_layout(height=280, margin=dict(l=0, r=40, t=10, b=10),
-                              xaxis_title=f"Preço simulado: {brl(preco)}")
-            st.plotly_chart(fig, use_container_width=True)
+            st.markdown("###### Cascata do preço — para onde vai cada real")
+            st.plotly_chart(waterfall([
+                ("Preço", preco, "absolute"),
+                ("Custos variáveis", -d.custo_var, "relative"),
+                ("Impostos", -d.impostos, "relative"),
+                ("Taxas do canal", -d.taxas_canal, "relative"),
+                ("Margem contrib.", 0, "total"),
+                ("Fixo rateado", -d.fixo_rateado, "relative"),
+                ("Lucro líquido", 0, "total"),
+            ], height=320), use_container_width=True)
             if d.lucro < 0:
                 st.error(f"Prejuízo de {brl(-d.lucro)} por unidade neste canal.")
         with e2:
-            st.subheader("Preço ideal & equilíbrio")
+            st.markdown("###### Preço ideal & equilíbrio")
             ideal = pricing.preco_ideal(cv, aliq, canal, meta, rateio)
             minimo = pricing.preco_ideal(cv, aliq, canal, 0, rateio)
-            st.metric(f"Preço p/ margem de {meta:.0f}%",
-                      brl(ideal) if ideal else "impossível")
-            st.metric("Preço mínimo (lucro zero)", brl(minimo) if minimo else "—")
             fixos_total = (db.pr_fixos()["valor_mensal"].sum()
                            if not db.pr_fixos().empty else 0.0)
             be = pricing.ponto_equilibrio(float(fixos_total), d.mc)
-            st.metric("Ponto de equilíbrio",
-                      f"{be:.0f} un/mês" if be else "—",
-                      help="Vendas deste item, sozinho, para pagar todos os "
-                           "custos fixos do mês.")
+            kpi_row([
+                {"label": f"Preço p/ margem de {meta:.0f}%",
+                 "value": brl(ideal) if ideal else "impossível",
+                 "tone": "ok" if ideal else "bad",
+                 "sub": "cobre variáveis, impostos, taxas e fixo"},
+                {"label": "Preço mínimo (lucro zero)",
+                 "value": brl(minimo) if minimo else "—", "tone": "warn",
+                 "sub": "abaixo disso é prejuízo"},
+                {"label": "Ponto de equilíbrio",
+                 "value": f"{be:.0f} un/mês" if be else "—", "tone": "info",
+                 "sub": f"p/ pagar {brl(fixos_total)} de fixos"},
+            ])
 
-        st.subheader("Comparativo entre canais")
+        st.markdown("###### Comparativo entre canais")
         comp = []
         for cn in _canais():
             dc = pricing.decompor(preco, cv, aliq, cn, rateio)
             comp.append({"Canal": cn.nome, "MC (R$)": dc.mc, "MC %": dc.mc_pct,
                          "Lucro/un": dc.lucro, "Lucro %": dc.lucro_pct,
-                         "Status": pricing.classificar(dc.lucro_pct)})
+                         "Status": status_rotulo(pricing.classificar(dc.lucro_pct))})
+        df_c = pd.DataFrame(comp).sort_values("Lucro/un", ascending=False)
         st.dataframe(
-            pd.DataFrame(comp).sort_values("Lucro/un", ascending=False),
+            df_c.style.map(cor_valor, subset=["MC (R$)", "Lucro/un"]),
             use_container_width=True, hide_index=True,
             column_config={
                 "MC (R$)": st.column_config.NumberColumn(format="R$ %.2f"),
