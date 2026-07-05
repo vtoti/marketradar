@@ -30,6 +30,14 @@ ML_REDIRECT_URI = os.getenv("ML_REDIRECT_URI", "https://localhost:8501").strip()
 ML_REFRESH_TOKEN = os.getenv("ML_REFRESH_TOKEN", "").strip()
 ML_TOKEN_FILE = DATA_DIR / "ml_tokens.json"
 
+# --- Bling (ERP) — engenharia de preços / análise de pedidos ---
+BLING_CLIENT_ID = os.getenv("BLING_CLIENT_ID", "").strip()
+BLING_CLIENT_SECRET = os.getenv("BLING_CLIENT_SECRET", "").strip()
+# Precisa bater com o "link de redirecionamento" cadastrado no app do Bling.
+BLING_REDIRECT_URI = os.getenv(
+    "BLING_REDIRECT_URI", "http://localhost:8501/Pedidos_Bling").strip()
+BLING_TOKEN_FILE = DATA_DIR / "bling_tokens.json"
+
 # --- Shopee ---
 SHOPEE_REGION = os.getenv("SHOPEE_REGION", "br").strip() or "br"
 SHOPEE_COOKIE = os.getenv("SHOPEE_COOKIE", "").strip()

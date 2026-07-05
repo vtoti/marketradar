@@ -24,6 +24,10 @@ Bem-vindo. Use o menu lateral para navegar:
 - **💡 Descoberta de Produtos** — compare vários nichos e ranqueie por
   **score de oportunidade** (alta demanda + baixa concorrência).
 - **🏪 Concorrentes** — monitore vendedores e termos ao longo do tempo.
+- **💰 Engenharia de Preços** — margem de contribuição real por produto e
+  canal: custos, impostos, taxas de marketplace e rateio de fixos.
+- **🧾 Pedidos Bling** — importe os pedidos do seu ERP e veja o lucro real
+  de cada venda, pedido a pedido.
 """
 )
 
