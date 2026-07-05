@@ -178,7 +178,8 @@ if synced_at:
 tabela = pd.DataFrame([{
     "Pedido": f"#{p.get('numero') or p['id']}",
     "Data": p.get("data") or "",
-    "Cliente": p.get("cliente") or "—",
+    "SKU": ", ".join(sorted({it.get("codigo") for it in (p.get("itens") or [])
+                             if it.get("codigo")})) or "—",
     "Situação": p.get("situacao") or "—",
     "Receita": a["receita"], "Custo prod.": a["custo_prod"],
     "Impostos": a["impostos"], "Taxas": a["taxas"], "Fonte taxa": a["fonte_taxa"],
