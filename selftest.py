@@ -212,9 +212,12 @@ def main():
     assert db.pr_get_config("aliquota") == "8.5"
     db.pr_save_pedidos([{**pedido, "id": 1, "numero": "42", "data": "2026-07-01",
                          "cliente": "Cliente T", "situacao": "Atendido",
-                         "loja": "", "desconto": 0}], now.isoformat())
+                         "loja": "203572110", "loja_nome": "Mercado Livre",
+                         "desconto": 0}], now.isoformat())
     carregados, sync_at = db.pr_load_pedidos()
     assert len(carregados) == 1 and carregados[0]["taxas"]["comissao"] == 32.28
+    assert carregados[0]["loja"] == "203572110"
+    assert carregados[0]["loja_nome"] == "Mercado Livre"
     assert sync_at == now.isoformat()
     print(f"    {len(db.pr_canais())} canais, produto salvo, "
           f"{len(carregados)} pedido em cache OK")

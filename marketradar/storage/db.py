@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS pr_pedidos (
     cliente TEXT,
     situacao TEXT,
     loja TEXT,
+    loja_nome TEXT DEFAULT '',
     total REAL,
     frete REAL,
     desconto REAL,
@@ -129,6 +130,11 @@ def init_db() -> None:
             conn.executemany(
                 "INSERT INTO pr_canais (nome, comissao_pct, tarifa_fixa, "
                 "frete_subsidiado) VALUES (?,?,?,?)", PR_CANAIS_PADRAO)
+        # migração: bancos criados antes da coluna loja_nome
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(pr_pedidos)")]
+        if "loja_nome" not in cols:
+            conn.execute(
+                "ALTER TABLE pr_pedidos ADD COLUMN loja_nome TEXT DEFAULT ''")
 
 
 def save_listings(listings: list[Listing]) -> int:
@@ -294,10 +300,12 @@ def pr_save_pedidos(pedidos: list[dict], synced_at: str) -> int:
         conn.execute("DELETE FROM pr_pedidos")
         conn.executemany(
             "INSERT OR REPLACE INTO pr_pedidos (id, numero, data, cliente, "
-            "situacao, loja, total, frete, desconto, comissao, custo_frete, "
-            "itens_json, synced_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "situacao, loja, loja_nome, total, frete, desconto, comissao, "
+            "custo_frete, itens_json, synced_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             [(p["id"], str(p.get("numero") or ""), p.get("data") or "",
               p.get("cliente") or "", p.get("situacao") or "", p.get("loja") or "",
+              p.get("loja_nome") or "",
               p.get("total") or 0, p.get("frete") or 0, p.get("desconto") or 0,
               (p.get("taxas") or {}).get("comissao") or 0,
               (p.get("taxas") or {}).get("custo_frete") or 0,
@@ -314,6 +322,7 @@ def pr_load_pedidos() -> tuple[list[dict], str | None]:
     pedidos = [{
         "id": r["id"], "numero": r["numero"], "data": r["data"],
         "cliente": r["cliente"], "situacao": r["situacao"], "loja": r["loja"],
+        "loja_nome": r["loja_nome"] if "loja_nome" in r.keys() else "",
         "total": r["total"], "frete": r["frete"], "desconto": r["desconto"],
         "taxas": {"comissao": r["comissao"], "custo_frete": r["custo_frete"]},
         "itens": _json.loads(r["itens_json"] or "[]"),

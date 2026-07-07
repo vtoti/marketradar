@@ -3,6 +3,7 @@ import _shared  # noqa: F401
 from _shared import (PALETTE, brl, cor_valor, inject_css, kpi_row, page_header,
                      status_rotulo, waterfall)
 
+import json
 from datetime import date, timedelta
 
 import pandas as pd
@@ -112,16 +113,58 @@ if not pedidos:
 
 # ------------------------------------------------------------- parâmetros
 canais_df = db.pr_canais()
-f1, f2 = st.columns(2)
+
+# nome amigável da loja: apelido salvo > nome vindo do Bling > "Loja {id}"
+apelidos = json.loads(db.pr_get_config("lojas_nomes", "{}") or "{}")
+
+
+def nome_loja(p: dict) -> str:
+    lid = str(p.get("loja") or "")
+    if not lid:
+        return "Venda direta / manual"
+    return apelidos.get(lid) or p.get("loja_nome") or f"Loja {lid}"
+
+
+lojas_opts = sorted({nome_loja(p) for p in pedidos})
+sits_opts = sorted({(p.get("situacao") or "—") for p in pedidos})
+
+f1, f2, f3 = st.columns([1.3, 1, 1])
 with f1:
     op = ["— nenhum (taxa zero) —"] + list(canais_df["nome"])
     salvo = db.pr_get_config("canal_padrao", "")
     padrao_nome = st.selectbox(
-        "Canal padrão p/ pedidos sem taxas informadas pelo Bling", op,
+        "Canal padrão p/ pedidos sem taxas do Bling", op,
         index=op.index(salvo) if salvo in op else 0)
     db.pr_set_config("canal_padrao", padrao_nome if padrao_nome != op[0] else "")
 with f2:
-    ignorar = st.text_input("Situações ignoradas (contém)", "cancelado")
+    lojas_sel = st.multiselect("🏬 Loja virtual", lojas_opts,
+                               default=lojas_opts,
+                               placeholder="Todas as lojas")
+with f3:
+    sits_padrao = [s for s in sits_opts if "cancelado" not in s.lower()]
+    sits_sel = st.multiselect("📋 Situação do pedido", sits_opts,
+                              default=sits_padrao or sits_opts,
+                              placeholder="Todas as situações")
+
+ids_lojas = sorted({str(p.get("loja")) for p in pedidos if p.get("loja")})
+if ids_lojas:
+    with st.expander("✏️ Renomear lojas virtuais"):
+        st.caption("O Bling identifica cada loja por um número. Dê nomes "
+                   "amigáveis (ex.: Mercado Livre, Shopee, Site próprio) — "
+                   "eles valem para a coluna Loja e para o filtro acima.")
+        with st.form("lojas_form", border=False):
+            novos, colunas = {}, st.columns(min(3, len(ids_lojas)))
+            for i, lid in enumerate(ids_lojas):
+                sugestao = apelidos.get(lid) or next(
+                    (p.get("loja_nome") for p in pedidos
+                     if str(p.get("loja")) == lid and p.get("loja_nome")), "")
+                novos[lid] = colunas[i % len(colunas)].text_input(
+                    f"Loja {lid}", value=sugestao, key=f"loja_{lid}")
+            if st.form_submit_button("💾 Salvar nomes", type="primary"):
+                db.pr_set_config("lojas_nomes", json.dumps(
+                    {k: v.strip() for k, v in novos.items() if v.strip()},
+                    ensure_ascii=False))
+                st.rerun()
 
 canal_padrao = None
 if padrao_nome != op[0]:
@@ -156,9 +199,9 @@ def _custo_local(codigo: str, descricao: str) -> float | None:
     return None
 
 
-termos = [t.strip().lower() for t in ignorar.split(",") if t.strip()]
 vivos = [p for p in pedidos
-         if not any(t in (p.get("situacao") or "").lower() for t in termos)]
+         if nome_loja(p) in lojas_sel
+         and (p.get("situacao") or "—") in sits_sel]
 analises = [(p, pricing.analisar_pedido(p, aliquota, rateio, canal_padrao,
                                         _custo_local)) for p in vivos]
 
@@ -171,7 +214,7 @@ sem_custo = sum(a["itens_sem_custo"] for _, a in analises)
 
 kpis = [
     {"label": "Pedidos analisados", "value": len(analises), "tone": "info",
-     "sub": (f"{len(pedidos) - len(analises)} ignorados por situação"
+     "sub": (f"{len(pedidos) - len(analises)} fora dos filtros"
              if len(pedidos) != len(analises) else "no período sincronizado")},
     {"label": "Receita", "value": brl(receita), "tone": "info"},
     {"label": "Margem de contribuição", "value": brl(mc_t), "tone": "neutral",
@@ -213,6 +256,7 @@ with t_ped:
     _tabela(pd.DataFrame([{
         "Pedido": f"#{p.get('numero') or p['id']}",
         "Data": p.get("data") or "",
+        "Loja": nome_loja(p),
         "SKU": ", ".join(sorted({it.get("codigo") for it in (p.get("itens") or [])
                                  if it.get("codigo")})) or "—",
         "Situação": p.get("situacao") or "—",
@@ -234,6 +278,7 @@ with t_item:
             linhas_item.append({
                 "Pedido": f"#{p.get('numero') or p['id']}",
                 "Data": p.get("data") or "",
+                "Loja": nome_loja(p),
                 "SKU": m["codigo"] or "—",
                 "Item": (m["descricao"] or "")[:50],
                 "Qtd": m["quantidade"],
@@ -291,7 +336,8 @@ with t_sku:
 
 with t_zoom:
     opcoes = {f"#{p.get('numero') or p['id']} · {p.get('data') or ''} · "
-              f"{p.get('cliente') or '?'} · {brl(a['receita'])}": (p, a)
+              f"{nome_loja(p)} · {p.get('cliente') or '?'} · "
+              f"{brl(a['receita'])}": (p, a)
               for p, a in analises}
     sel = st.selectbox("Escolha o pedido", list(opcoes))
     p, a = opcoes[sel]

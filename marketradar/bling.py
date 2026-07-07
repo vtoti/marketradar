@@ -191,6 +191,20 @@ def _mapa_custos() -> dict:
     return mapa
 
 
+def _mapa_lojas() -> dict:
+    """loja_id → nome, via canais de venda. Falha silenciosa (escopo opcional)."""
+    lojas: dict = {}
+    try:
+        body = _get("/canais-venda?pagina=1&limite=100")
+        for c in body.get("data") or []:
+            if c.get("id"):
+                nome = (c.get("descricao") or c.get("tipo") or "").strip()
+                lojas[str(c["id"])] = nome
+    except RuntimeError:
+        pass  # sem escopo de canais de venda — usuário renomeia na tela
+    return lojas
+
+
 def sync_pedidos(data_inicial: str, data_final: str,
                  progress: Callable[[int, int, str], None] | None = None) -> list[dict]:
     """Baixa pedidos do período (AAAA-MM-DD) já enriquecidos com custos.
@@ -204,6 +218,8 @@ def sync_pedidos(data_inicial: str, data_final: str,
 
     _p(0, 1, "Baixando custos dos produtos…")
     custos = _mapa_custos()
+    _p(0, 1, "Identificando lojas virtuais…")
+    lojas = _mapa_lojas()
 
     resumo: list[dict] = []
     for pagina in range(1, 100):
@@ -239,6 +255,7 @@ def sync_pedidos(data_inicial: str, data_final: str,
                             or (r.get("situacao") or {}).get("valor")
                             or (det.get("situacao") or {}).get("id") or ""),
             "loja": str((det.get("loja") or {}).get("id") or ""),
+            "loja_nome": lojas.get(str((det.get("loja") or {}).get("id") or ""), ""),
             "total": float(det.get("total") or r.get("total") or 0),
             "frete": float((det.get("transporte") or {}).get("frete") or 0),
             "desconto": float((det.get("desconto") or {}).get("valor") or 0),
